@@ -9,6 +9,9 @@
     .PARAMETER ComputerName
         Name of computer or computers you want to query
 
+    .PARAMETER CheckServices
+        Check diagtrack and sense services
+
     .PARAMETER DisableProgressBar
         Disables the progress bar
 
@@ -51,20 +54,30 @@
 		Display search results to the console with only machine name and EDR block status
 
     .EXAMPLE
+		Get-EDRDeviceState -CheckServices
+
+		Query the run state of the diagtrack and sense service
+
+    .EXAMPLE
 		Get-EDRDeviceState -SaveResults
 
 		Query for EDR information and save results to disk
 
 	.NOTES
 		Data is saved to the $env:Temp location of the user that executed the script
+        For more information: https://learn.microsoft.com/en-us/microsoft-365/security/defender-endpoint/troubleshoot-onboarding?view=o365-worldwide
     #>
 
     [CmdletBinding()]
     [OutputType('System.String')]
     [OutputType('System.IO.File')]
+    [Alias('CheckEDR')]
     param(
         [object[]]
         $ComputerName,
+
+        [switch]
+        $CheckServices,
 
         [switch]
         $DisableProgressBar,
@@ -91,6 +104,8 @@
     begin {
         Write-Output "Starting EDR discovery process"
         $parameters = $PSBoundParameters
+        $policyCounter = 0
+        $progressCounter = 1
         $successfulConnectionsFound = 0
         $failedConnectionsFound = 0
         [System.Collections.ArrayList]$computerObjects = @()
@@ -100,13 +115,19 @@
     process {
         try {
             if (-NOT ($ComputerName)) {
-                Write-Verbose "No computer name passed in. Retrieving full domain computer list"
+                Write-Verbose "No computer name passed in. Trying to retrieve full domain computer list"
                 $computers = Get-ADComputer -Filter * | Select-Object -ExpandProperty Name -ErrorAction Stop
             }
             else {
                 $computers = $ComputerName
             }
+        }
+        catch {
+            Write-Output "Get-ADComputer needs to be run on an on-premise domain controller"
+            return
+        }
 
+        try {
             foreach ($computer in $computers) {
                 if (-NOT ($parameters.ContainsKey('DisableProgressBar'))) {
                     $policyCounter ++
@@ -125,6 +146,7 @@
                     }
                     $failedConnectionsFound ++
                     $null = $failedConnections.Add($failure)
+                    return
                 }
                 else {
                     if ($connection.AMRunningMode -eq 'Normal') { $edrMode = 'Defender in Active Mode' } else { $edrMode = 'Defender in Passive Mode' }
@@ -155,6 +177,25 @@
         }
         catch {
             Write-Output "Error: $_"
+            return
+        }
+
+        try {
+            # Service checks
+            if ($parameters.ContainsKey('CheckServices')) {
+                $services = @('diagtrack', 'sense')
+                foreach ($service in $services) {
+                    Write-Output "Checking state of $($service) service"
+                    Start-Process -FilePath "C:\Windows\System32\sc.exe" -ArgumentList "qc $($service)" -NoNewWindow -RedirectStandardOutput "$env:Temp\$($service).txt" -Wait -ErrorAction SilentlyContinue
+                    $scStatus = Get-Content "$env:Temp\$($service).txt"
+                    if ((($scStatus -replace '\s+')[4] -split '([0-9]{1})')[2] -eq 'AUTO_START') { Write-Output "$($service) service check: GOOD" }
+                    else { Write-Output "ERROR: $($service) service check: failed! Service is not set to AUTO_START. Please run: sc config $($service) start=auto" }
+                }
+            }
+        }
+        catch {
+            Write-Output "Error: $_"
+            return
         }
 
         try {
@@ -165,6 +206,7 @@
         }
         catch {
             Write-Output "Error: $_"
+            return
         }
     }
 
