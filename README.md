@@ -24,6 +24,10 @@ Copy this script down and save it to a local directory and run the following com
 
     Display search results to the console with only machine name and EDR block status
 
-- EXAMPLE 5: Get-EDRDeviceState -SaveResults
+- EXAMPLE 5: Get-EDRDeviceState -CheckServices
+
+    Query the run state of the diagtrack and sense service
+
+- EXAMPLE 6: Get-EDRDeviceState -SaveResults
 
     Query for EDR information and save results to disk
